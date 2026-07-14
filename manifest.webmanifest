@@ -1,0 +1,16 @@
+{
+  "name": "Dra. Grisel Vargas — Odontología",
+  "short_name": "Dra. Grisel",
+  "description": "Consultorio de ortodoncia y odontología general. Reserva de citas, tratamiento y pagos.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F7F1EB",
+  "theme_color": "#F7F1EB",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
