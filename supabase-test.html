@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Prueba de login — Dra. Grisel Vargas</title>
+<style>
+  body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#F7F1EB;color:#3B322E;
+       margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .card{background:#fff;border:1px solid #E9D3C5;border-radius:20px;padding:28px;max-width:420px;width:100%;
+        box-shadow:0 14px 40px rgba(217,173,162,.25);}
+  h1{font-size:20px;margin:0 0 4px;}
+  p{font-size:14px;line-height:1.5;color:#7a6a60;margin:6px 0;}
+  button{width:100%;border:none;border-radius:12px;padding:14px;font-size:15px;font-weight:600;cursor:pointer;margin-top:12px;}
+  .g{background:#D9ADA2;color:#fff;}
+  .o{background:#F1E7DE;color:#3B322E;}
+  .box{background:#F7F1EB;border-radius:12px;padding:14px;margin-top:16px;font-size:14px;word-break:break-all;}
+  .ok{color:#4a8c5f;font-weight:700;}
+  .bad{color:#c0392b;font-weight:700;}
+  code{background:#F1E7DE;padding:2px 6px;border-radius:6px;font-size:12px;}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Prueba de acceso</h1>
+    <p>Esta página comprueba que el login con Google + Supabase quedó bien configurado, antes de conectar la app completa.</p>
+    <div id="status" class="box">Cargando…</div>
+    <button id="loginBtn" class="g" style="display:none">Entrar con Google</button>
+    <button id="logoutBtn" class="o" style="display:none">Cerrar sesión</button>
+    <p style="margin-top:16px;font-size:12px;opacity:.7">Correo de la doctora configurado: <code id="docmail">—</code></p>
+  </div>
+
+  <script type="module">
+    import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
+
+    // ==== TUS DATOS (ya rellenados) ====
+    const SUPABASE_URL = "https://gjizdpuyhmtwuwneingj.supabase.co";
+    const SUPABASE_KEY = "sb_publishable_WoRnrJ3MePJEyRQ8J87CFg_vFtBswUK";
+    const DOCTOR_EMAIL = "consultorio.grisel@gmail.com"; // cámbialo por el correo real de la doctora
+    // ===================================
+
+    document.getElementById("docmail").textContent = DOCTOR_EMAIL;
+    const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+    const statusEl = document.getElementById("status");
+    const loginBtn = document.getElementById("loginBtn");
+    const logoutBtn = document.getElementById("logoutBtn");
+
+    async function refresh(){
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session && session.user) {
+        const email = session.user.email || "(sin correo)";
+        const esDoctora = email.trim().toLowerCase() === DOCTOR_EMAIL.trim().toLowerCase();
+        statusEl.innerHTML =
+          '<div class="ok">✅ Sesión iniciada</div>' +
+          '<div style="margin-top:8px">Correo: <b>' + email + '</b></div>' +
+          '<div style="margin-top:6px">Entraría como: <b>' + (esDoctora ? "DOCTORA (panel completo)" : "PACIENTE") + '</b></div>';
+        loginBtn.style.display = "none";
+        logoutBtn.style.display = "block";
+      } else {
+        statusEl.innerHTML = 'Aún no has iniciado sesión. Toca el botón para probar.';
+        loginBtn.style.display = "block";
+        logoutBtn.style.display = "none";
+      }
+    }
+
+    loginBtn.onclick = async () => {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: window.location.href.split("#")[0] }
+      });
+      if (error) statusEl.innerHTML = '<div class="bad">Error: ' + error.message + '</div>';
+    };
+
+    logoutBtn.onclick = async () => { await supabase.auth.signOut(); refresh(); };
+
+    // Procesa el regreso desde Google y muestra el estado
+    supabase.auth.onAuthStateChange(() => refresh());
+    refresh();
+  </script>
+</body>
+</html>
