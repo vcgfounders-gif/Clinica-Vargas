@@ -660,6 +660,21 @@ function getSupabase() {
   return _sbPromise;
 }
 const AUTH_KEY = "gv_auth_v1";
+const SESSION_MS = 12 * 60 * 60 * 1000; // cerrar sesión tras 12 h de inactividad
+const ACT_KEY = "gv_last_active";
+const touchActivity = () => {
+  try {
+    localStorage.setItem(ACT_KEY, String(Date.now()));
+  } catch (e) {}
+};
+const sessionExpired = () => {
+  try {
+    const t = +(localStorage.getItem(ACT_KEY) || 0);
+    return t > 0 && Date.now() - t > SESSION_MS;
+  } catch (e) {
+    return false;
+  }
+};
 const DOC_EMAIL_KEY = "gv_doc_email_v1";
 const getDoctorEmail = () => {
   try {
@@ -7064,6 +7079,10 @@ function App() {
   const [data, setData] = useState(Store.read());
   const [auth, setAuth] = useState(() => {
     try {
+      if (sessionExpired()) {
+        safeSet(AUTH_KEY, "");
+        return null;
+      }
       const r = safeGet(AUTH_KEY);
       return r ? JSON.parse(r) : null;
     } catch (e) {
@@ -7126,6 +7145,7 @@ function App() {
     }
     setAuth(user);
     safeSet(AUTH_KEY, JSON.stringify(user));
+    touchActivity();
     setLoginReason(null);
   };
   const logout = () => {
@@ -7146,6 +7166,10 @@ function App() {
     const onSession = session => {
       const u = session && session.user;
       if (!u) return;
+      if (sessionExpired()) {
+        getSupabase().then(sb => sb.auth.signOut()).catch(() => {});
+        return;
+      }
       const key = (u.email || "").toLowerCase();
       if (handledRef.current === key) return;
       handledRef.current = key;
@@ -7169,6 +7193,25 @@ function App() {
       } catch (e) {}
     };
   }, []);
+  useEffect(() => {
+    if (!auth) return;
+    touchActivity();
+    const bump = () => touchActivity();
+    const evs = ["click", "keydown", "touchstart", "mousemove", "visibilitychange"];
+    evs.forEach(ev => window.addEventListener(ev, bump, {
+      passive: true
+    }));
+    const iv = setInterval(() => {
+      if (sessionExpired()) {
+        toast("Sesión cerrada por seguridad (inactividad)", "err");
+        logout();
+      }
+    }, 20000);
+    return () => {
+      evs.forEach(ev => window.removeEventListener(ev, bump));
+      clearInterval(iv);
+    };
+  }, [auth]);
   const updateAuth = next => {
     setAuth(prev => {
       const u = {
