@@ -1,5 +1,5 @@
 /* Service worker: permite abrir la app sin conexión y que se instale en el celular */
-const CACHE = "gv-clinica-v4";
+const CACHE = "gv-clinica-v5";
 const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-180.png"];
 
 self.addEventListener("install", e => {

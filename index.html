@@ -644,6 +644,80 @@ const NS = "gv_clinic_v1";
    GOOGLE_CLIENT_ID: pega tu Client ID de Google para login real; vacío = modo demo. */
 const DOCTOR_EMAIL = "gvdental.bo@gmail.com";
 const GOOGLE_CLIENT_ID = "";
+/* ---- Capa de nube: estado visible para saber si conectó ---- */
+const Cloud = {
+  ok: false,
+  error: null,
+  listeners: [],
+  set(ok, error) {
+    this.ok = ok;
+    this.error = error || null;
+    this.listeners.forEach(f => {
+      try {
+        f();
+      } catch (e) {}
+    });
+  },
+  on(f) {
+    this.listeners.push(f);
+    return () => {
+      this.listeners = this.listeners.filter(x => x !== f);
+    };
+  }
+};
+/* Mapeo servicios: base de datos <-> app */
+const svcFromDB = r => ({
+  id: r.id,
+  name: r.name,
+  dur: r.duration_min || 30,
+  price: Number(r.price) || 0,
+  color: r.color || "var(--rosy)",
+  recallEvery: r.recall_every || 0,
+  recallUnit: r.recall_unit || "meses"
+});
+const svcToDB = s => ({
+  name: s.name,
+  duration_min: +s.dur || 30,
+  price: +s.price || 0,
+  color: s.color || "var(--rosy)",
+  recall_every: +(s.recallEvery !== undefined ? s.recallEvery : s.recallMonths || 0) || 0,
+  recall_unit: s.recallUnit || "meses"
+});
+async function cloudFetchServices() {
+  const sb = await getSupabase();
+  const {
+    data,
+    error
+  } = await sb.from("services").select("*").order("name");
+  if (error) throw error;
+  return (data || []).map(svcFromDB);
+}
+async function cloudSaveService(s) {
+  const sb = await getSupabase();
+  if (s.id && String(s.id).length > 20) {
+    // uuid existente
+    const {
+      data,
+      error
+    } = await sb.from("services").update(svcToDB(s)).eq("id", s.id).select().single();
+    if (error) throw error;
+    return svcFromDB(data);
+  }
+  const {
+    data,
+    error
+  } = await sb.from("services").insert(svcToDB(s)).select().single();
+  if (error) throw error;
+  return svcFromDB(data);
+}
+async function cloudDeleteService(id) {
+  const sb = await getSupabase();
+  const {
+    error
+  } = await sb.from("services").delete().eq("id", id);
+  if (error) throw error;
+}
+
 /* ---- Supabase (login real) ---- */
 const SUPABASE_URL = "https://gjizdpuyhmtwuwneingj.supabase.co";
 const SUPABASE_KEY = "sb_publishable_WoRnrJ3MePJEyRQ8J87CFg_vFtBswUK";
@@ -5662,6 +5736,14 @@ function DocConfig() {
     }
   }));
   const [confReset, setConfReset] = useState(false);
+  const [nube, setNube] = useState({
+    ok: Cloud.ok,
+    error: Cloud.error
+  });
+  useEffect(() => Cloud.on(() => setNube({
+    ok: Cloud.ok,
+    error: Cloud.error
+  })), []);
   const [chgMail, setChgMail] = useState(false);
   const [docEmail, setDocEmail] = useState(getDoctorEmail());
   const [newMail, setNewMail] = useState("");
@@ -5683,24 +5765,44 @@ function DocConfig() {
       [k]: !ch[k]
     }
   });
-  const saveService = s => {
+  const saveService = async s => {
+    setSvcEdit(null);
+    try {
+      const guardado = await cloudSaveService(s);
+      app.update(d => ({
+        ...d,
+        services: s.id ? d.services.map(x => x.id === s.id ? guardado : x) : [...d.services, guardado]
+      }));
+      Cloud.set(true, null);
+      app.toast("Servicio guardado en la nube", "ok");
+    } catch (err) {
+      app.update(d => ({
+        ...d,
+        services: s.id ? d.services.map(x => x.id === s.id ? {
+          ...x,
+          ...s
+        } : x) : [...d.services, {
+          ...s,
+          id: uid("s")
+        }]
+      }));
+      Cloud.set(false, err && err.message || "sin conexión");
+      app.toast("Guardado solo en este dispositivo", "err");
+    }
+  };
+  const delService = async id => {
     app.update(d => ({
       ...d,
-      services: s.id ? d.services.map(x => x.id === s.id ? {
-        ...x,
-        ...s
-      } : x) : [...d.services, {
-        ...s,
-        id: uid("s")
-      }]
+      services: d.services.filter(s => s.id !== id)
     }));
-    setSvcEdit(null);
-    app.toast("Servicio guardado", "ok");
+    try {
+      await cloudDeleteService(id);
+      Cloud.set(true, null);
+    } catch (err) {
+      Cloud.set(false, err && err.message || "sin conexión");
+      app.toast("Se borró aquí, pero no en la nube", "err");
+    }
   };
-  const delService = id => app.update(d => ({
-    ...d,
-    services: d.services.filter(s => s.id !== id)
-  }));
   const addSlot = () => {
     const v = newSlot.trim();
     if (!/^\d{2}:\d{2}$/.test(v)) return app.toast("Usa formato HH:MM", "err");
@@ -5863,6 +5965,37 @@ function DocConfig() {
       app.toast("Correo de acceso actualizado", "ok");
     }
   }, "Guardar")))), /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      marginBottom: 20,
+      borderColor: nube.ok ? "var(--ok)" : "var(--line-2)"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "ico-b",
+    style: {
+      background: nube.ok ? "var(--ok)" : "var(--cream-2)",
+      color: nube.ok ? "#fff" : "var(--muted)"
+    }
+  }, /*#__PURE__*/React.createElement(Ic, {
+    d: nube.ok ? I.check : I.alert,
+    size: 18,
+    fill: nube.ok ? "#fff" : "none"
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("b", {
+    style: {
+      fontSize: 14
+    }
+  }, nube.ok ? "Servicios conectados a la nube" : "Trabajando sin conexión"), /*#__PURE__*/React.createElement("div", {
+    className: "tiny"
+  }, nube.ok ? "Los servicios y precios se guardan en la base de datos." : nube.error || "Los cambios se guardan solo en este dispositivo.")))), /*#__PURE__*/React.createElement("div", {
     className: "eyebrow",
     style: {
       margin: "0 2px 10px"
@@ -7191,6 +7324,42 @@ function App() {
       try {
         unsub && unsub.unsubscribe();
       } catch (e) {}
+    };
+  }, []);
+
+  // Etapa 3.1 — Servicios desde Supabase (con respaldo local si falla)
+  useEffect(() => {
+    let vivo = true;
+    cloudFetchServices().then(list => {
+      if (!vivo) return;
+      Cloud.set(true, null);
+      if (!list.length) return;
+      setData(prev => {
+        // Reasignar las citas que apunten a servicios locales, emparejando por nombre
+        const porNombre = {};
+        list.forEach(s => {
+          porNombre[s.name.toLowerCase()] = s.id;
+        });
+        const viejoANuevo = {};
+        (prev.services || []).forEach(v => {
+          const n = porNombre[String(v.name || "").toLowerCase()];
+          if (n) viejoANuevo[v.id] = n;
+        });
+        const citas = (prev.appointments || []).map(a => viejoANuevo[a.serviceId] ? {
+          ...a,
+          serviceId: viejoANuevo[a.serviceId]
+        } : a);
+        return {
+          ...prev,
+          services: list,
+          appointments: citas
+        };
+      });
+    }).catch(err => {
+      if (vivo) Cloud.set(false, err && err.message || "sin conexión");
+    });
+    return () => {
+      vivo = false;
     };
   }, []);
   useEffect(() => {
