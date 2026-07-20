@@ -740,6 +740,74 @@ async function cloudSaveClinic(clinic) {
   });
   if (error) throw error;
 }
+function newId() {
+  try {
+    return crypto.randomUUID();
+  } catch (e) {
+    return "p" + Date.now() + Math.random().toString(36).slice(2, 8);
+  }
+}
+const patFromDB = r => ({
+  id: r.id,
+  _uid: r.user_id || null,
+  name: r.name || "",
+  email: r.email || "",
+  phone: r.phone || "",
+  age: r.age || "",
+  allergies: r.allergies || "",
+  history: r.history || "",
+  diagnosis: r.diagnosis || "",
+  treatment: r.treatment || "",
+  notes: r.notes || "",
+  ortho: r.ortho || {
+    active: false
+  },
+  evolution: r.evolution || [],
+  files: r.files || []
+});
+const patToDB = p => ({
+  id: p.id,
+  user_id: p._uid || null,
+  name: p.name || "",
+  email: p.email || "",
+  phone: p.phone || "",
+  age: +p.age || null,
+  allergies: p.allergies || "",
+  history: p.history || "",
+  diagnosis: p.diagnosis || "",
+  treatment: p.treatment || "",
+  notes: p.notes || "",
+  ortho: p.ortho || {
+    active: false
+  },
+  evolution: p.evolution || [],
+  files: p.files || []
+});
+async function cloudFetchPatientsAll() {
+  const sb = await getSupabase();
+  const {
+    data,
+    error
+  } = await sb.from("patients").select("*").order("name");
+  if (error) throw error;
+  return (data || []).map(patFromDB);
+}
+async function cloudFetchMyPatient(uid) {
+  const sb = await getSupabase();
+  const {
+    data,
+    error
+  } = await sb.from("patients").select("*").eq("user_id", uid).maybeSingle();
+  if (error) throw error;
+  return data ? patFromDB(data) : null;
+}
+async function cloudUpsertPatients(list) {
+  const sb = await getSupabase();
+  const {
+    error
+  } = await sb.from("patients").upsert(list.map(patToDB));
+  if (error) throw error;
+}
 
 /* ---- Supabase (login real) ---- */
 const SUPABASE_URL = "https://gjizdpuyhmtwuwneingj.supabase.co";
@@ -4303,7 +4371,7 @@ function NewPatientSheet({
   });
   const save = () => {
     if (!f.name.trim()) return app.toast("Ingresa el nombre", "err");
-    const id = uid("p");
+    const id = newId();
     app.update(d => ({
       ...d,
       patients: [...d.patients, {
@@ -7331,6 +7399,8 @@ function App() {
   const [pendingBook, setPendingBook] = useState(false);
   const handledRef = useRef(null);
   const clinicLoaded = useRef(false);
+  const cloudAuthed = useRef(false);
+  const patientsLoaded = useRef(false);
   useEffect(() => {
     if (Store.write(data) === false) toast("Almacenamiento casi lleno. Conviene conectar una base de datos gratuita para más fotos.", "err");
   }, [data]);
@@ -7407,6 +7477,7 @@ function App() {
         getSupabase().then(sb => sb.auth.signOut()).catch(() => {});
         return;
       }
+      cloudAuthed.current = true;
       const key = (u.email || "").toLowerCase();
       if (handledRef.current === key) return;
       handledRef.current = key;
@@ -7497,6 +7568,60 @@ function App() {
     }, 900);
     return () => clearTimeout(t);
   }, [data.clinic]);
+
+  // Etapa 3.3 — Pacientes desde Supabase (según rol)
+  useEffect(() => {
+    let vivo = true;
+    getSupabase().then(sb => sb.auth.getSession()).then(({
+      data: {
+        session
+      }
+    }) => {
+      const u = session && session.user;
+      if (!u || !vivo) return;
+      cloudAuthed.current = true;
+      if (isDoctorEmail(u.email)) {
+        cloudFetchPatientsAll().then(list => {
+          if (vivo) {
+            setData(prev => ({
+              ...prev,
+              patients: list
+            }));
+            Cloud.set(true, null);
+          }
+        }).catch(err => {
+          if (vivo) Cloud.set(false, err && err.message || "sin conexión");
+        });
+      } else {
+        cloudFetchMyPatient(u.id).then(p => {
+          if (vivo && p) {
+            setData(prev => ({
+              ...prev,
+              patients: [p],
+              currentPatientId: p.id
+            }));
+            Cloud.set(true, null);
+          }
+        }).catch(err => {
+          if (vivo) Cloud.set(false, err && err.message || "sin conexión");
+        });
+      }
+    }).catch(() => {});
+    return () => {
+      vivo = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (!patientsLoaded.current) {
+      patientsLoaded.current = true;
+      return;
+    }
+    if (!cloudAuthed.current) return;
+    const t = setTimeout(() => {
+      cloudUpsertPatients(data.patients).then(() => Cloud.set(true, null)).catch(err => Cloud.set(false, err && err.message || "sin conexión"));
+    }, 1000);
+    return () => clearTimeout(t);
+  }, [data.patients]);
   useEffect(() => {
     if (!auth) return;
     touchActivity();
