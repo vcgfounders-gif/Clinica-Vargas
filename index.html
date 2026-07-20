@@ -720,6 +720,26 @@ async function cloudDeleteService(id) {
   } = await sb.from("services").delete().eq("id", id);
   if (error) throw error;
 }
+async function cloudFetchClinic() {
+  const sb = await getSupabase();
+  const {
+    data,
+    error
+  } = await sb.from("clinic").select("data").eq("id", 1).maybeSingle();
+  if (error) throw error;
+  return data && data.data ? data.data : null;
+}
+async function cloudSaveClinic(clinic) {
+  const sb = await getSupabase();
+  const {
+    error
+  } = await sb.from("clinic").upsert({
+    id: 1,
+    data: clinic,
+    updated_at: new Date().toISOString()
+  });
+  if (error) throw error;
+}
 
 /* ---- Supabase (login real) ---- */
 const SUPABASE_URL = "https://gjizdpuyhmtwuwneingj.supabase.co";
@@ -5739,6 +5759,50 @@ function DocConfig() {
     }
   }));
   const [confReset, setConfReset] = useState(false);
+  const restoreRef = useRef();
+  const descargarRespaldo = () => {
+    try {
+      const blob = JSON.stringify({
+        app: "clinica-grisel",
+        version: 1,
+        fecha: new Date().toISOString(),
+        data: app.data
+      });
+      const nombre = "respaldo-clinica-" + todayISO() + ".json";
+      const b = new Blob([blob], {
+        type: "application/json"
+      });
+      const u = URL.createObjectURL(b);
+      const a = document.createElement("a");
+      a.href = u;
+      a.download = nombre;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(u), 1500);
+      app.toast("Copia de seguridad descargada", "ok");
+    } catch (e) {
+      app.toast("No se pudo descargar", "err");
+    }
+  };
+  const restaurarRespaldo = e => {
+    const f = e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      try {
+        const j = JSON.parse(rd.result);
+        const d = j && j.data ? j.data : j;
+        if (!d || !d.clinic || !Array.isArray(d.patients)) return app.toast("Archivo no válido", "err");
+        app.update(() => d);
+        app.toast("Datos restaurados", "ok");
+      } catch (err) {
+        app.toast("No se pudo leer el archivo", "err");
+      }
+    };
+    rd.readAsText(f);
+  };
   const [nube, setNube] = useState({
     ok: Cloud.ok,
     error: Cloud.error
@@ -5996,9 +6060,9 @@ function DocConfig() {
     style: {
       fontSize: 14
     }
-  }, nube.ok ? "Servicios conectados a la nube" : "Trabajando sin conexión"), /*#__PURE__*/React.createElement("div", {
+  }, nube.ok ? "Conectado a la nube" : "Trabajando sin conexión"), /*#__PURE__*/React.createElement("div", {
     className: "tiny"
-  }, nube.ok ? "Los servicios y precios se guardan en la base de datos." : nube.error || "Los cambios se guardan solo en este dispositivo.")))), /*#__PURE__*/React.createElement("div", {
+  }, nube.ok ? "Servicios, horarios y configuración se guardan en la base de datos." : nube.error || "Los cambios se guardan solo en este dispositivo.")))), /*#__PURE__*/React.createElement("div", {
     className: "eyebrow",
     style: {
       margin: "0 2px 10px"
@@ -6280,7 +6344,43 @@ function DocConfig() {
   }, /*#__PURE__*/React.createElement(Ic, {
     d: I.logout,
     size: 18
-  }), " Cerrar sesión"), /*#__PURE__*/React.createElement("button", {
+  }), " Cerrar sesión"), /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow",
+    style: {
+      margin: "18px 2px 10px"
+    }
+  }, "Copia de seguridad"), /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "tiny",
+    style: {
+      marginBottom: 12,
+      opacity: .8
+    }
+  }, "Descarga todos los datos (pacientes, citas, pagos) en un archivo. Guárdalo en un lugar seguro; sirve para no perder nada."), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-soft btn-block",
+    onClick: descargarRespaldo
+  }, /*#__PURE__*/React.createElement(Ic, {
+    d: I.download || I.chevR,
+    size: 18
+  }), " Descargar copia de seguridad"), /*#__PURE__*/React.createElement("input", {
+    ref: restoreRef,
+    type: "file",
+    accept: "application/json,.json",
+    style: {
+      display: "none"
+    },
+    onChange: restaurarRespaldo
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost btn-block",
+    style: {
+      marginTop: 8
+    },
+    onClick: () => restoreRef.current.click()
+  }, "Restaurar desde un archivo")), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-block",
     style: {
       color: "var(--danger)",
@@ -7230,6 +7330,7 @@ function App() {
   const [loginReason, setLoginReason] = useState(null);
   const [pendingBook, setPendingBook] = useState(false);
   const handledRef = useRef(null);
+  const clinicLoaded = useRef(false);
   useEffect(() => {
     if (Store.write(data) === false) toast("Almacenamiento casi lleno. Conviene conectar una base de datos gratuita para más fotos.", "err");
   }, [data]);
@@ -7365,6 +7466,37 @@ function App() {
       vivo = false;
     };
   }, []);
+
+  // Etapa 3.2 — Configuración del consultorio desde/hacia Supabase
+  useEffect(() => {
+    let vivo = true;
+    cloudFetchClinic().then(c => {
+      if (vivo && c) setData(prev => ({
+        ...prev,
+        clinic: {
+          ...prev.clinic,
+          ...c
+        }
+      }));
+      if (vivo) Cloud.set(true, null);
+    }).catch(err => {
+      if (vivo) Cloud.set(false, err && err.message || "sin conexión");
+    });
+    return () => {
+      vivo = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (!clinicLoaded.current) {
+      clinicLoaded.current = true;
+      return;
+    } // no guardar en el primer render
+    if (!(auth && isDoctorEmail(auth.email))) return; // solo la doctora escribe
+    const t = setTimeout(() => {
+      cloudSaveClinic(data.clinic).then(() => Cloud.set(true, null)).catch(err => Cloud.set(false, err && err.message || "sin conexión"));
+    }, 900);
+    return () => clearTimeout(t);
+  }, [data.clinic]);
   useEffect(() => {
     if (!auth) return;
     touchActivity();
