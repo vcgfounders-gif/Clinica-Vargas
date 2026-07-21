@@ -817,12 +817,31 @@ let _sb = null,
 function getSupabase() {
   if (_sb) return Promise.resolve(_sb);
   if (!_sbPromise) {
-    _sbPromise = import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm").then(m => {
-      _sb = m.createClient(SUPABASE_URL, SUPABASE_KEY);
+    _sbPromise = import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm").then(m => {
+      _sb = m.createClient(SUPABASE_URL, SUPABASE_KEY, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true,
+          storageKey: "gv_sb_auth"
+        }
+      });
       return _sb;
     });
   }
   return _sbPromise;
+}
+// Devuelve la sesión activa de Supabase (o null). La nube SOLO se usa si hay sesión real.
+async function cloudSession() {
+  try {
+    const sb = await getSupabase();
+    const {
+      data
+    } = await sb.auth.getSession();
+    return data && data.session ? data.session : null;
+  } catch (e) {
+    return null;
+  }
 }
 const AUTH_KEY = "gv_auth_v1";
 const SESSION_MS = 12 * 60 * 60 * 1000; // cerrar sesión tras 12 h de inactividad
@@ -7563,7 +7582,9 @@ function App() {
       return;
     } // no guardar en el primer render
     if (!(auth && isDoctorEmail(auth.email))) return; // solo la doctora escribe
-    const t = setTimeout(() => {
+    const t = setTimeout(async () => {
+      const s = await cloudSession();
+      if (!s) return; // sin sesión de Google → no intentar (no 401)
       cloudSaveClinic(data.clinic).then(() => Cloud.set(true, null)).catch(err => Cloud.set(false, err && err.message || "sin conexión"));
     }, 900);
     return () => clearTimeout(t);
@@ -7578,8 +7599,13 @@ function App() {
       }
     }) => {
       const u = session && session.user;
-      if (!u || !vivo) return;
+      if (!u) {
+        if (vivo) Cloud.set(false, "Inicia sesión con Google para guardar en la nube.");
+        return;
+      }
+      if (!vivo) return;
       cloudAuthed.current = true;
+      Cloud.set(true, null);
       if (isDoctorEmail(u.email)) {
         cloudFetchPatientsAll().then(list => {
           if (vivo) {
@@ -7617,7 +7643,9 @@ function App() {
       return;
     }
     if (!cloudAuthed.current) return;
-    const t = setTimeout(() => {
+    const t = setTimeout(async () => {
+      const s = await cloudSession();
+      if (!s) return;
       cloudUpsertPatients(data.patients).then(() => Cloud.set(true, null)).catch(err => Cloud.set(false, err && err.message || "sin conexión"));
     }, 1000);
     return () => clearTimeout(t);
