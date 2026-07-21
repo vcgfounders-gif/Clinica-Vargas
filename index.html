@@ -801,6 +801,41 @@ async function cloudFetchMyPatient(uid) {
   if (error) throw error;
   return data ? patFromDB(data) : null;
 }
+const apptFromDB = r => ({
+  id: r.id,
+  patientId: r.patient_id,
+  serviceId: r.service_id,
+  date: r.date,
+  time: r.time,
+  status: r.status || "pendiente",
+  note: r.notes || ""
+});
+const apptToDB = a => ({
+  id: a.id,
+  patient_id: a.patientId,
+  service_id: a.serviceId || null,
+  date: a.date,
+  time: a.time,
+  status: a.status || "pendiente",
+  notes: a.note || ""
+});
+async function cloudFetchAppointments() {
+  const sb = await getSupabase();
+  const {
+    data,
+    error
+  } = await sb.from("appointments").select("*").order("date");
+  if (error) throw error;
+  return (data || []).map(apptFromDB);
+}
+async function cloudUpsertAppointments(list) {
+  if (!list.length) return;
+  const sb = await getSupabase();
+  const {
+    error
+  } = await sb.from("appointments").upsert(list.map(apptToDB));
+  if (error) throw error;
+}
 async function cloudUpsertPatients(list) {
   const sb = await getSupabase();
   const {
@@ -2070,7 +2105,7 @@ function BookFlow({
     if (bookableDays.length && !bookableDays.includes(date)) setDate(bookableDays[0]);
   }, [bookableDays]);
   const confirm = () => {
-    const apptId = uid("a");
+    const apptId = newId();
     app.update(d => ({
       ...d,
       appointments: [...d.appointments, {
@@ -7615,14 +7650,14 @@ function App() {
       cloudAuthed.current = true;
       Cloud.set(true, null);
       if (isDoctorEmail(u.email)) {
-        cloudFetchPatientsAll().then(list => {
+        Promise.all([cloudFetchPatientsAll(), cloudFetchAppointments()]).then(([list, citas]) => {
           if (vivo) {
             setData(prev => {
               const ids = new Set(list.map(p => p.id));
               return {
                 ...prev,
                 patients: list,
-                appointments: (prev.appointments || []).filter(a => ids.has(a.patientId)),
+                appointments: citas.filter(a => ids.has(a.patientId)),
                 payments: (prev.payments || []).filter(p => ids.has(p.patientId))
               };
             });
@@ -7632,12 +7667,13 @@ function App() {
           if (vivo) Cloud.set(false, err && err.message || "sin conexión");
         });
       } else {
-        cloudFetchMyPatient(u.id).then(p => {
+        Promise.all([cloudFetchMyPatient(u.id), cloudFetchAppointments()]).then(([p, citas]) => {
           if (vivo && p) {
             setData(prev => ({
               ...prev,
               patients: [p],
-              currentPatientId: p.id
+              currentPatientId: p.id,
+              appointments: citas
             }));
             Cloud.set(true, null);
           }
@@ -7663,6 +7699,20 @@ function App() {
     }, 1000);
     return () => clearTimeout(t);
   }, [data.patients]);
+  const apptsLoaded = useRef(false);
+  useEffect(() => {
+    if (!apptsLoaded.current) {
+      apptsLoaded.current = true;
+      return;
+    }
+    if (!cloudAuthed.current) return;
+    const t = setTimeout(async () => {
+      const s = await cloudSession();
+      if (!s) return;
+      cloudUpsertAppointments(data.appointments).then(() => Cloud.set(true, null)).catch(err => Cloud.set(false, err && err.message || "sin conexión"));
+    }, 900);
+    return () => clearTimeout(t);
+  }, [data.appointments]);
   useEffect(() => {
     if (!auth) return;
     touchActivity();
