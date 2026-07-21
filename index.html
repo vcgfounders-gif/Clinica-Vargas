@@ -192,8 +192,8 @@ h1,h2,h3,h4{font-family:var(--font-serif);font-weight:400;letter-spacing:-.01em;
 .iconbtn .dot{position:absolute;top:9px;right:9px;width:8px;height:8px;border-radius:50%;background:var(--danger);border:2px solid var(--surface)}
 
 /* Sheet / modal */
-.sheet-back{position:fixed;inset:0;background:rgba(59,50,46,.42);z-index:60;display:flex;align-items:flex-end;
-  justify-content:center;animation:fade .2s ease}
+.sheet-back{position:fixed;inset:0;background:rgba(59,50,46,.42);z-index:60;display:flex;align-items:flex-end;justify-content:center;overflow-y:auto;animation:fade .2s ease}
+@media(min-width:820px){.sheet-back{align-items:center;padding:24px}.sheet{border-radius:24px !important;max-height:88vh !important;margin:auto}}
 .sheet{width:100%;max-width:480px;background:var(--cream);border-radius:28px 28px 0 0;
   padding:22px 18px calc(22px + var(--safe-bot));max-height:92vh;overflow-y:auto;animation:up .28s cubic-bezier(.2,.8,.2,1)}
 .sheet .grab{width:40px;height:5px;border-radius:99px;background:var(--line);margin:0 auto 16px}
