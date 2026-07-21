@@ -836,6 +836,47 @@ async function cloudUpsertAppointments(list) {
   } = await sb.from("appointments").upsert(list.map(apptToDB));
   if (error) throw error;
 }
+const payFromDB = r => ({
+  id: r.id,
+  patientId: r.patient_id,
+  concept: r.concept || "",
+  total: Number(r.total) || 0,
+  paid: Number(r.paid) || 0,
+  nextAmount: Number(r.next_amount) || 0,
+  nextDate: r.next_date || "",
+  cuotas: r.cuotas || [],
+  installments: r.installments || [],
+  proofs: r.proofs || []
+});
+const payToDB = p => ({
+  id: p.id,
+  patient_id: p.patientId,
+  concept: p.concept || "",
+  total: +p.total || 0,
+  paid: +p.paid || 0,
+  next_amount: +p.nextAmount || 0,
+  next_date: p.nextDate || null,
+  cuotas: p.cuotas || [],
+  installments: p.installments || [],
+  proofs: p.proofs || []
+});
+async function cloudFetchPayments() {
+  const sb = await getSupabase();
+  const {
+    data,
+    error
+  } = await sb.from("payments").select("*");
+  if (error) throw error;
+  return (data || []).map(payFromDB);
+}
+async function cloudUpsertPayments(list) {
+  if (!list.length) return;
+  const sb = await getSupabase();
+  const {
+    error
+  } = await sb.from("payments").upsert(list.map(payToDB));
+  if (error) throw error;
+}
 async function cloudUpsertPatients(list) {
   const sb = await getSupabase();
   const {
@@ -4568,7 +4609,7 @@ function PatientDetail({
         ...payload
       } : x) : [...d.payments, {
         ...payload,
-        id: uid("pay"),
+        id: newId(),
         patientId: p.id,
         proofs: []
       }]
@@ -7650,7 +7691,7 @@ function App() {
       cloudAuthed.current = true;
       Cloud.set(true, null);
       if (isDoctorEmail(u.email)) {
-        Promise.all([cloudFetchPatientsAll(), cloudFetchAppointments()]).then(([list, citas]) => {
+        Promise.all([cloudFetchPatientsAll(), cloudFetchAppointments(), cloudFetchPayments()]).then(([list, citas, pagos]) => {
           if (vivo) {
             setData(prev => {
               const ids = new Set(list.map(p => p.id));
@@ -7658,7 +7699,7 @@ function App() {
                 ...prev,
                 patients: list,
                 appointments: citas.filter(a => ids.has(a.patientId)),
-                payments: (prev.payments || []).filter(p => ids.has(p.patientId))
+                payments: pagos.filter(p => ids.has(p.patientId))
               };
             });
             Cloud.set(true, null);
@@ -7667,13 +7708,14 @@ function App() {
           if (vivo) Cloud.set(false, err && err.message || "sin conexión");
         });
       } else {
-        Promise.all([cloudFetchMyPatient(u.id), cloudFetchAppointments()]).then(([p, citas]) => {
+        Promise.all([cloudFetchMyPatient(u.id), cloudFetchAppointments(), cloudFetchPayments()]).then(([p, citas, pagos]) => {
           if (vivo && p) {
             setData(prev => ({
               ...prev,
               patients: [p],
               currentPatientId: p.id,
-              appointments: citas
+              appointments: citas,
+              payments: pagos
             }));
             Cloud.set(true, null);
           }
@@ -7713,6 +7755,21 @@ function App() {
     }, 900);
     return () => clearTimeout(t);
   }, [data.appointments]);
+  const paysLoaded = useRef(false);
+  useEffect(() => {
+    if (!paysLoaded.current) {
+      paysLoaded.current = true;
+      return;
+    }
+    if (!cloudAuthed.current) return;
+    if (!(auth && isDoctorEmail(auth.email))) return; // solo la doctora escribe pagos
+    const t = setTimeout(async () => {
+      const s = await cloudSession();
+      if (!s) return;
+      cloudUpsertPayments(data.payments).then(() => Cloud.set(true, null)).catch(err => Cloud.set(false, err && err.message || "sin conexión"));
+    }, 900);
+    return () => clearTimeout(t);
+  }, [data.payments]);
   useEffect(() => {
     if (!auth) return;
     touchActivity();
