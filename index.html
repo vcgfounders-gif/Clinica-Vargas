@@ -1740,7 +1740,15 @@ function svc(app, id) {
   };
 }
 function pat(app, id) {
-  return app.data.patients.find(p => p.id === id);
+  return app.data.patients.find(p => p.id === id) || (id ? {
+    id,
+    name: "—",
+    ortho: {
+      active: false
+    },
+    files: [],
+    evolution: []
+  } : null);
 }
 
 /* =========================================================
@@ -7609,10 +7617,15 @@ function App() {
       if (isDoctorEmail(u.email)) {
         cloudFetchPatientsAll().then(list => {
           if (vivo) {
-            setData(prev => ({
-              ...prev,
-              patients: list
-            }));
+            setData(prev => {
+              const ids = new Set(list.map(p => p.id));
+              return {
+                ...prev,
+                patients: list,
+                appointments: (prev.appointments || []).filter(a => ids.has(a.patientId)),
+                payments: (prev.payments || []).filter(p => ids.has(p.patientId))
+              };
+            });
             Cloud.set(true, null);
           }
         }).catch(err => {
