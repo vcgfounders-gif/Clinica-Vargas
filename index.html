@@ -917,6 +917,25 @@ async function cloudUpsertNotifications(list) {
   } = await sb.from("notifications").upsert(list.map(notifToDB));
   if (error) throw error;
 }
+// Sube una imagen (dataURL) a Supabase Storage y devuelve un enlace firmado (1 año)
+async function cloudUploadImage(dataUrl, opts) {
+  opts = opts || {};
+  const sb = await getSupabase();
+  const blob = await (await fetch(dataUrl)).blob();
+  const ext = ((opts.name || "").match(/\.[a-z0-9]+$/i) || [".webp"])[0].toLowerCase();
+  const path = (opts.kind || "clinico") + "/" + (opts.patientId || "gen") + "/" + Date.now() + "-" + Math.random().toString(36).slice(2, 8) + ext;
+  const up = await sb.storage.from("archivos").upload(path, blob, {
+    contentType: opts.contentType || "image/webp",
+    upsert: false
+  });
+  if (up.error) throw up.error;
+  const sig = await sb.storage.from("archivos").createSignedUrl(path, 60 * 60 * 24 * 365);
+  if (sig.error) throw sig.error;
+  return {
+    path,
+    url: sig.data.signedUrl
+  };
+}
 async function cloudUpsertPatients(list) {
   const sb = await getSupabase();
   const {
@@ -2831,35 +2850,26 @@ function PatientPayments({
         maxEdge: 1600,
         quality: 0.82
       });
-      const proof = {
-        id: uid("pr"),
-        name: r.name,
-        type: r.type,
-        data: r.dataUrl,
-        bytes: r.bytes,
-        date: todayISO()
-      };
-      app.update(d => ({
-        ...d,
-        payments: d.payments.map(x => x.id === target.id ? {
-          ...x,
-          paid: (+x.paid || 0) + amt,
-          installments: [...(x.installments || []), {
-            date: todayISO(),
-            amount: amt,
-            method: "Comprobante"
-          }],
-          proofs: [...(x.proofs || []), proof]
-        } : x)
-      }));
+      let link = null;
+      try {
+        const up = await cloudUploadImage(r.dataUrl, {
+          patientId: me.id,
+          kind: "comprobante",
+          name: r.name,
+          contentType: r.type
+        });
+        link = up.url;
+      } catch (e2) {
+        link = null;
+      }
       pushNotif(app, {
         to: "doctor",
         type: "pay",
-        title: "Pago con comprobante",
-        text: me.name + " registró un pago de " + money(amt) + " con comprobante.",
+        title: "Comprobante de pago recibido",
+        text: me.name + " envió un comprobante por " + money(amt) + "." + (link ? " Ver: " + link : ""),
         patientId: me.id
       });
-      app.toast("Pago de " + money(amt) + " registrado", "ok");
+      app.toast("Comprobante enviado. La doctora registrará tu pago.", "ok");
     } catch (err) {
       app.toast("No se pudo procesar el archivo", "err");
     }
@@ -4606,13 +4616,24 @@ function PatientDetail({
           quality: 0.82
         });
         const nf = {
-          id: uid("f"),
+          id: newId(),
           name: r.name,
           type: r.type,
-          data: r.dataUrl,
           bytes: r.bytes,
           date: todayISO()
         };
+        try {
+          const up = await cloudUploadImage(r.dataUrl, {
+            patientId: p.id,
+            kind: "clinico",
+            name: r.name,
+            contentType: r.type
+          });
+          nf.url = up.url;
+          nf.path = up.path;
+        } catch (e2) {
+          nf.data = r.dataUrl;
+        } // sin nube: queda local
         app.update(d => ({
           ...d,
           patients: d.patients.map(x => x.id === p.id ? {
@@ -4820,7 +4841,7 @@ function PatientDetail({
       padding: 8
     }
   }, f.type && f.type.startsWith("image") ? /*#__PURE__*/React.createElement("img", {
-    src: f.data,
+    src: f.url || f.data,
     style: {
       width: "100%",
       height: 110,
@@ -4975,7 +4996,7 @@ function PatientDetail({
     }
   }, pay.proofs.map((pr, i) => pr.type && pr.type.startsWith("image") ? /*#__PURE__*/React.createElement("img", {
     key: i,
-    src: pr.data,
+    src: pr.url || pr.data,
     style: {
       width: 60,
       height: 60,
@@ -4986,7 +5007,7 @@ function PatientDetail({
   }) : /*#__PURE__*/React.createElement("a", {
     key: i,
     className: "chip chip-line",
-    href: pr.data,
+    href: pr.url || pr.data,
     download: pr.name
   }, /*#__PURE__*/React.createElement(Ic, {
     d: I.file,
