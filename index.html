@@ -5192,6 +5192,7 @@ function PaymentForm({
   onSave,
   onCancel
 }) {
+  const app = useApp();
   const [f, setF] = useState(initial || {
     concept: "",
     total: 0,
@@ -5223,22 +5224,25 @@ function PaymentForm({
     setAmt("");
   };
   const genPlan = () => {
-    const n = +plan.count || 0,
-      a = +plan.amount || 0;
-    if (n < 1 || a <= 0) return;
+    const n = +plan.count || 0;
+    let a = +plan.amount || 0;
+    if (n < 1) return app.toast("Indica cuántas cuotas", "err");
+    if (a <= 0 && +f.total > 0) a = Math.round(+f.total / n); // si no pusiste monto, reparte el total
+    if (a <= 0) return app.toast("Escribe el monto por cuota o el costo total", "err");
     const cuotas = Array.from({
       length: n
     }).map((_, i) => ({
       dueDate: addDays(plan.start, i * (+plan.everyDays || 30)),
       amount: a
     }));
-    setF({
-      ...f,
+    setF(prev => ({
+      ...prev,
       cuotas,
-      total: +f.total || 0 || n * a,
-      nextAmount: +f.nextAmount || 0 || a,
+      total: +prev.total || 0 || n * a,
+      nextAmount: +prev.nextAmount || 0 || a,
       nextDate: cuotas[0].dueDate
-    });
+    }));
+    app.toast(n + " cuotas generadas", "ok");
   };
   const S = k => ({
     value: f[k],
