@@ -1,6 +1,6 @@
 /* Service worker — SIEMPRE red primero para el HTML (nunca caché vieja).
    La caché solo se usa como respaldo cuando no hay internet. */
-const CACHE = "gv-clinica-" + "20260717i";           // cambia en cada versión
+const CACHE = "gv-clinica-" + "20260717j";           // cambia en cada versión
 const ESTATICOS = ["./icon-192.png", "./icon-512.png", "./icon-180.png", "./manifest.webmanifest"];
 
 self.addEventListener("install", e => {

@@ -877,6 +877,46 @@ async function cloudUpsertPayments(list) {
   } = await sb.from("payments").upsert(list.map(payToDB));
   if (error) throw error;
 }
+const notifFromDB = r => ({
+  id: r.id,
+  patientId: r.patient_id || null,
+  to: r.audience || "patient",
+  type: r.type || "info",
+  title: r.title || "",
+  text: r.body || "",
+  read: !!r.read,
+  date: (r.created_at || "").slice(0, 10),
+  ts: r.created_at ? new Date(r.created_at).getTime() : 0,
+  channel: "app"
+});
+const notifToDB = n => ({
+  id: n.id,
+  patient_id: n.patientId || null,
+  audience: n.to || "patient",
+  type: n.type || "info",
+  title: n.title || "",
+  body: n.text || "",
+  read: !!n.read
+});
+async function cloudFetchNotifications() {
+  const sb = await getSupabase();
+  const {
+    data,
+    error
+  } = await sb.from("notifications").select("*").order("created_at", {
+    ascending: false
+  }).limit(200);
+  if (error) throw error;
+  return (data || []).map(notifFromDB);
+}
+async function cloudUpsertNotifications(list) {
+  if (!list.length) return;
+  const sb = await getSupabase();
+  const {
+    error
+  } = await sb.from("notifications").upsert(list.map(notifToDB));
+  if (error) throw error;
+}
 async function cloudUpsertPatients(list) {
   const sb = await getSupabase();
   const {
@@ -1701,8 +1741,9 @@ function Ring({
    ========================================================= */
 function pushNotif(app, n) {
   const notif = {
-    id: uid("nt"),
+    id: newId(),
     date: todayISO(),
+    ts: Date.now(),
     read: false,
     channel: "app",
     ...n
@@ -3288,7 +3329,7 @@ function NotifCenter({
   const app = useApp();
   const mePid = app.data.currentPatientId;
   const belongs = n => n.to === audience && (audience !== "patient" || !n.patientId || n.patientId === mePid);
-  const list = app.data.notifications.filter(belongs).sort((a, b) => b.id.localeCompare(a.id));
+  const list = app.data.notifications.filter(belongs).sort((a, b) => (b.ts || 0) - (a.ts || 0) || String(b.id).localeCompare(String(a.id)));
   useEffect(() => {
     // marcar como leídas al abrir
     if (list.some(n => !n.read)) app.update(d => ({
@@ -5460,7 +5501,8 @@ function DocMarketing() {
         emoji: "📣"
       }, ...d.news],
       notifications: [{
-        id: uid("nt"),
+        id: newId(),
+        ts: Date.now(),
         to: "patient",
         type: "info",
         channel: f.channels.includes("email") ? "email" : "app",
@@ -7695,7 +7737,7 @@ function App() {
       cloudAuthed.current = true;
       Cloud.set(true, null);
       if (isDoctorEmail(u.email)) {
-        Promise.all([cloudFetchPatientsAll(), cloudFetchAppointments(), cloudFetchPayments()]).then(([list, citas, pagos]) => {
+        Promise.all([cloudFetchPatientsAll(), cloudFetchAppointments(), cloudFetchPayments(), cloudFetchNotifications()]).then(([list, citas, pagos, notis]) => {
           if (vivo) {
             setData(prev => {
               const ids = new Set(list.map(p => p.id));
@@ -7703,7 +7745,8 @@ function App() {
                 ...prev,
                 patients: list,
                 appointments: citas.filter(a => ids.has(a.patientId)),
-                payments: pagos.filter(p => ids.has(p.patientId))
+                payments: pagos.filter(p => ids.has(p.patientId)),
+                notifications: notis
               };
             });
             Cloud.set(true, null);
@@ -7712,14 +7755,15 @@ function App() {
           if (vivo) Cloud.set(false, err && err.message || "sin conexión");
         });
       } else {
-        Promise.all([cloudFetchMyPatient(u.id), cloudFetchAppointments(), cloudFetchPayments()]).then(([p, citas, pagos]) => {
+        Promise.all([cloudFetchMyPatient(u.id), cloudFetchAppointments(), cloudFetchPayments(), cloudFetchNotifications()]).then(([p, citas, pagos, notis]) => {
           if (vivo && p) {
             setData(prev => ({
               ...prev,
               patients: [p],
               currentPatientId: p.id,
               appointments: citas,
-              payments: pagos
+              payments: pagos,
+              notifications: notis
             }));
             Cloud.set(true, null);
           }
@@ -7774,6 +7818,23 @@ function App() {
     }, 900);
     return () => clearTimeout(t);
   }, [data.payments]);
+  const notisLoaded = useRef(false);
+  useEffect(() => {
+    if (!notisLoaded.current) {
+      notisLoaded.current = true;
+      return;
+    }
+    if (!cloudAuthed.current) return;
+    const isDoc = auth && isDoctorEmail(auth.email);
+    const mias = isDoc ? data.notifications : data.notifications.filter(n => n.patientId && n.patientId === data.currentPatientId);
+    if (!mias.length) return;
+    const t = setTimeout(async () => {
+      const s = await cloudSession();
+      if (!s) return;
+      cloudUpsertNotifications(mias).then(() => Cloud.set(true, null)).catch(err => Cloud.set(false, err && err.message || "sin conexión"));
+    }, 900);
+    return () => clearTimeout(t);
+  }, [data.notifications]);
   useEffect(() => {
     if (!auth) return;
     touchActivity();
