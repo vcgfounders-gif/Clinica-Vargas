@@ -7390,19 +7390,66 @@ function LoginScreen({
     setGLoading(true);
     try {
       const sb = await getSupabase();
-      const {
-        error
-      } = await sb.auth.signInWithOAuth({
-        provider: "google",
-        options: {
-          redirectTo: location.href.split("#")[0]
+      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+      const isPWA = window.navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches;
+      if (isSafari || isPWA) {
+        // Safari y PWAs: usar popup para evitar el bug de redirección de OAuth
+        const {
+          data,
+          error
+        } = await sb.auth.signInWithOAuth({
+          provider: "google",
+          options: {
+            redirectTo: location.href.split("#")[0],
+            skipBrowserRedirect: true
+          }
+        });
+        if (error) {
+          app.toast("No se pudo abrir Google: " + error.message, "err");
+          setGLoading(false);
+          return;
         }
-      });
-      if (error) {
-        app.toast("No se pudo abrir Google: " + error.message, "err");
-        setGLoading(false);
+        if (data && data.url) {
+          const popup = window.open(data.url, "google-login", "width=500,height=600,left=100,top=100");
+          if (!popup) {
+            window.location.href = data.url;
+            return;
+          } // si bloquea el popup, redirigir
+          const iv = setInterval(async () => {
+            try {
+              if (popup.closed) {
+                clearInterval(iv);
+                setGLoading(false);
+                const {
+                  data: {
+                    session
+                  }
+                } = await sb.auth.getSession();
+                if (!session) {
+                  app.toast("No se completó el acceso. Inténtalo de nuevo.", "err");
+                }
+              }
+            } catch (e) {
+              clearInterval(iv);
+              setGLoading(false);
+            }
+          }, 500);
+        }
+      } else {
+        // Chrome y otros: redirect normal
+        const {
+          error
+        } = await sb.auth.signInWithOAuth({
+          provider: "google",
+          options: {
+            redirectTo: location.href.split("#")[0]
+          }
+        });
+        if (error) {
+          app.toast("No se pudo abrir Google: " + error.message, "err");
+          setGLoading(false);
+        }
       }
-      // si todo va bien, el navegador redirige a Google y vuelve solo
     } catch (e) {
       app.toast("No se pudo cargar el acceso con Google", "err");
       setGLoading(false);
