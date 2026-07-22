@@ -1,53 +1,80 @@
-/* Service worker — SIEMPRE red primero para el HTML (nunca caché vieja).
-   La caché solo se usa como respaldo cuando no hay internet. */
-const CACHE = "gv-clinica-" + "20260717k";           // cambia en cada versión
-const ESTATICOS = ["./icon-192.png", "./icon-512.png", "./icon-180.png", "./manifest.webmanifest"];
+/* Service worker — SIEMPRE red primero para el HTML, borra caché vieja agresivamente */
+const VERSION = "20260722a";
+const CACHE = "gv-" + VERSION;
+const ESTATICOS = ["./icon-192.png","./icon-512.png","./icon-180.png","./manifest.webmanifest"];
 
+/* Instala y activa inmediatamente sin esperar */
 self.addEventListener("install", e => {
-  // activa la versión nueva de inmediato, sin esperar
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ESTATICOS)).then(() => self.skipWaiting()));
-});
-
-self.addEventListener("activate", e => {
   e.waitUntil(
-    caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))) // borra cachés viejas
-      .then(() => self.clients.claim())
+    caches.open(CACHE)
+      .then(c => c.addAll(ESTATICOS))
+      .then(() => self.skipWaiting()) // activa de inmediato, sin esperar
   );
 });
 
-self.addEventListener("message", e => { if (e.data === "skipWaiting") self.skipWaiting(); });
+/* Al activar: borra TODAS las cachés viejas sin excepción */
+self.addEventListener("activate", e => {
+  e.waitUntil(
+    caches.keys()
+      .then(keys => Promise.all(
+        keys.filter(k => k !== CACHE).map(k => {
+          console.log("[SW] borrando caché vieja:", k);
+          return caches.delete(k);
+        })
+      ))
+      .then(() => self.clients.claim()) // toma control de todos los tabs abiertos
+      .then(() => {
+        // Avisa a todos los tabs que se recarguen con la versión nueva
+        return self.clients.matchAll({type:"window"}).then(clients =>
+          clients.forEach(client => client.postMessage({type:"SW_UPDATED", version:VERSION}))
+        );
+      })
+  );
+});
+
+/* Mensajes desde la app */
+self.addEventListener("message", e => {
+  if (e.data === "skipWaiting" || (e.data && e.data.type === "SKIP_WAITING")) {
+    self.skipWaiting();
+  }
+});
 
 self.addEventListener("fetch", e => {
   const req = e.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
-  if (url.origin !== location.origin) return; // no tocar APIs externas (Supabase, etc.)
+
+  /* No interceptar peticiones externas (Supabase, CDNs) */
+  if (url.origin !== location.origin) return;
 
   const esHTML = req.mode === "navigate" ||
-                 (req.headers.get("accept") || "").includes("text/html") ||
+                 (req.headers.get("accept")||"").includes("text/html") ||
                  url.pathname.endsWith(".html");
 
   if (esHTML) {
-    // HTML: SIEMPRE de la red. Solo si no hay internet, se usa la copia guardada.
+    /* HTML: SIEMPRE de la red con no-store, nunca de caché */
     e.respondWith(
-      fetch(req, { cache: "no-store" })
+      fetch(req, {cache:"no-store"})
         .then(res => {
           const copia = res.clone();
-          caches.open(CACHE).then(c => c.put(req, copia)).catch(() => {});
+          caches.open(CACHE).then(c => c.put(req, copia)).catch(()=>{});
           return res;
         })
-        .catch(() => caches.match(req).then(r => r || caches.match("./index.html")))
+        .catch(() =>
+          caches.match(req)
+            .then(r => r || caches.match("./index.html"))
+            .then(r => r || new Response("Sin conexión", {status:503}))
+        )
     );
     return;
   }
 
-  // Íconos y demás: primero la caché (son fijos), pero se refrescan por detrás
+  /* Íconos y manifest: caché primero pero actualiza por detrás */
   e.respondWith(
     caches.match(req).then(cached => {
-      const red = fetch(req).then(res => {
+      const red = fetch(req, {cache:"no-store"}).then(res => {
         const copia = res.clone();
-        caches.open(CACHE).then(c => c.put(req, copia)).catch(() => {});
+        caches.open(CACHE).then(c => c.put(req, copia)).catch(()=>{});
         return res;
       }).catch(() => cached);
       return cached || red;

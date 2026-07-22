@@ -7928,29 +7928,60 @@ ReactDOM.createRoot(document.getElementById("root")).render(/*#__PURE__*/React.c
 (function(){
   if (!("serviceWorker" in navigator)) return;
   var recargando = false;
-  navigator.serviceWorker.addEventListener("controllerchange", function(){
-    if (recargando) return; recargando = true;
-    location.reload(); // ya hay versión nueva: recarga automática
+
+  function recargar(){
+    if (recargando) return;
+    recargando = true;
+    // Limpiar todas las cachés del navegador antes de recargar
+    if (window.caches) {
+      caches.keys().then(function(keys){
+        return Promise.all(keys.map(function(k){ return caches.delete(k); }));
+      }).then(function(){ location.reload(true); });
+    } else {
+      location.reload(true);
+    }
+  }
+
+  // Escuchar mensaje del SW "hay versión nueva"
+  navigator.serviceWorker.addEventListener("message", function(e){
+    if (e.data && e.data.type === "SW_UPDATED") { recargar(); }
   });
+
+  // Recargar cuando cambia el controlador (nueva versión activada)
+  navigator.serviceWorker.addEventListener("controllerchange", recargar);
+
   window.addEventListener("load", function(){
-    navigator.serviceWorker.register("sw.js", { updateViaCache: "none" })
+    navigator.serviceWorker.register("sw.js", {updateViaCache:"none"})
       .then(function(reg){
+        // Buscar actualizaciones al cargar
         reg.update();
-        setInterval(function(){ reg.update(); }, 60000); // busca versiones nuevas cada minuto
+        // Buscar cada 30 segundos
+        setInterval(function(){ reg.update(); }, 30000);
+        // Si hay un SW esperando, aplicarlo de inmediato
+        if (reg.waiting) {
+          reg.waiting.postMessage({type:"SKIP_WAITING"});
+        }
         reg.addEventListener("updatefound", function(){
           var nuevo = reg.installing;
           if (!nuevo) return;
           nuevo.addEventListener("statechange", function(){
-            if (nuevo.state === "installed" && navigator.serviceWorker.controller) {
-              nuevo.postMessage("skipWaiting"); // aplica la versión nueva de inmediato
+            if (nuevo.state === "installed") {
+              if (navigator.serviceWorker.controller) {
+                // Hay versión nueva esperando: aplicar de inmediato
+                nuevo.postMessage({type:"SKIP_WAITING"});
+              }
             }
           });
         });
       }).catch(function(){});
   });
+
+  // Al volver a la app (desde segundo plano), verificar si hay versión nueva
   document.addEventListener("visibilitychange", function(){
-    if (!document.hidden && navigator.serviceWorker.getRegistration) {
-      navigator.serviceWorker.getRegistration().then(function(r){ if(r) r.update(); }).catch(function(){});
+    if (!document.hidden) {
+      navigator.serviceWorker.getRegistration()
+        .then(function(r){ if(r) r.update(); })
+        .catch(function(){});
     }
   });
 })();
