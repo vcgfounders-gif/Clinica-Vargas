@@ -2207,19 +2207,34 @@ function BookFlow({
   }, [bookableDays]);
   const confirm = () => {
     const apptId = newId();
+    const nuevaCita = {
+      id: apptId,
+      patientId: me.id,
+      serviceId,
+      date,
+      time,
+      status: "pendiente",
+      note: desc,
+      urgency: triage ? triage.level : "baja"
+    };
     app.update(d => ({
       ...d,
-      appointments: [...d.appointments, {
-        id: apptId,
-        patientId: me.id,
-        serviceId,
-        date,
-        time,
-        status: "pendiente",
-        note: desc,
-        urgency: triage ? triage.level : "baja"
-      }]
+      appointments: [...d.appointments, nuevaCita]
     }));
+    // Escritura directa a Supabase (no depende del efecto debounced)
+    getSupabase().then(async sb => {
+      const { data: { session } } = await sb.auth.getSession();
+      if (!session) return;
+      await sb.from("appointments").upsert({
+        id: nuevaCita.id,
+        patient_id: nuevaCita.patientId,
+        service_id: nuevaCita.serviceId || null,
+        date: nuevaCita.date,
+        time: nuevaCita.time,
+        status: nuevaCita.status,
+        notes: nuevaCita.note || ""
+      });
+    }).catch(() => {});
     // Notificación a la doctora
     pushNotif(app, {
       to: "doctor",
