@@ -4069,7 +4069,7 @@ function ApptSheet({
       status: st
     } : x)
   }));
-  const confirmAndSend = channel => {
+  const confirmAndSend = async channel => {
     setStatus("confirmada");
     pushNotif(app, {
       to: "patient",
@@ -4079,6 +4079,26 @@ function ApptSheet({
       title: "Cita confirmada ✔",
       text: msg
     });
+    // Enviar correo automático via Edge Function (Resend)
+    if(p && p.email){
+      try{
+        const sb=await getSupabase();
+        const {data:{session}}=await sb.auth.getSession();
+        fetch("https://gjizdpuyhmtwuwneingj.supabase.co/functions/v1/confirmar-cita", {
+          method:"POST",
+          headers:{"Content-Type":"application/json","Authorization":"Bearer "+(session&&session.access_token||"")},
+          body:JSON.stringify({
+            paciente:{nombre:p.name||"Paciente",email:p.email,telefono:p.phone||""},
+            servicio:s&&s.name||"Consulta",
+            fecha:a.date,
+            hora:a.time,
+            notasDoctora:a.note||""
+          })
+        }).then(r=>r.json()).then(r=>{
+          if(r.paciente==="enviado"||r.doctora==="enviado") app.toast("Correos enviados","ok");
+        }).catch(()=>{});
+      }catch(e){}
+    }
     if (channel === "wa") {
       const ph = (p && p.phone || "").replace(/[^0-9]/g, "");
       window.open("https://wa.me/" + ph + "?text=" + encodeURIComponent(msg), "_blank");
