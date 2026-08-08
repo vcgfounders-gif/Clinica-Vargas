@@ -7445,30 +7445,8 @@ function LoginScreen({
           return;
         }
         if (data && data.url) {
-          const popup = window.open(data.url, "google-login", "width=500,height=600,left=100,top=100");
-          if (!popup) {
-            window.location.href = data.url;
-            return;
-          } // si bloquea el popup, redirigir
-          const iv = setInterval(async () => {
-            try {
-              if (popup.closed) {
-                clearInterval(iv);
-                setGLoading(false);
-                const {
-                  data: {
-                    session
-                  }
-                } = await sb.auth.getSession();
-                if (!session) {
-                  app.toast("No se completó el acceso. Inténtalo de nuevo.", "err");
-                }
-              }
-            } catch (e) {
-              clearInterval(iv);
-              setGLoading(false);
-            }
-          }, 500);
+          // Redirect directo (más confiable que popup para procesar la sesión OAuth)
+          window.location.href = data.url;
         }
       } else {
         // Chrome y otros: redirect normal
