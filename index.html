@@ -958,7 +958,8 @@ function getSupabase() {
           persistSession: true,
           autoRefreshToken: true,
           detectSessionInUrl: true,
-          storageKey: "gv_sb_auth"
+          storageKey: "gv_sb_auth",
+          flowType: "pkce"
         }
       });
       return _sb;
@@ -7435,7 +7436,7 @@ function LoginScreen({
         } = await sb.auth.signInWithOAuth({
           provider: "google",
           options: {
-            redirectTo: location.href.split("#")[0],
+            redirectTo: "https://vcgfounders-gif.github.io/Clinica-Vargas/",
             skipBrowserRedirect: true
           }
         });
@@ -7455,7 +7456,7 @@ function LoginScreen({
         } = await sb.auth.signInWithOAuth({
           provider: "google",
           options: {
-            redirectTo: location.href.split("#")[0]
+            redirectTo: "https://vcgfounders-gif.github.io/Clinica-Vargas/"
           }
         });
         if (error) {
@@ -7983,42 +7984,6 @@ function App() {
   }, t.msg))));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(/*#__PURE__*/React.createElement(App, null));
-</script>
-<script>
-// Procesar sesión de Supabase inmediatamente si viene de redirect de Google
-(function(){
-  var hash = window.location.hash || "";
-  var search = window.location.search || "";
-  var hasTokens = hash.includes("access_token") || hash.includes("refresh_token") ||
-                  search.includes("code=") || search.includes("access_token");
-  if(hasTokens){
-    // Guardar los tokens en localStorage para que Supabase los encuentre
-    try{
-      var params = new URLSearchParams(hash.replace("#",""));
-      var accessToken = params.get("access_token");
-      var refreshToken = params.get("refresh_token");
-      var expiresIn = params.get("expires_in") || "3600";
-      var tokenType = params.get("token_type") || "bearer";
-      if(accessToken){
-        var session = {
-          access_token: accessToken,
-          refresh_token: refreshToken,
-          expires_in: parseInt(expiresIn),
-          token_type: tokenType,
-          expires_at: Math.floor(Date.now()/1000) + parseInt(expiresIn)
-        };
-        localStorage.setItem("gv_sb_auth", JSON.stringify({
-          currentSession: session,
-          expiresAt: session.expires_at
-        }));
-        // Limpiar la URL sin recargar
-        if(window.history && window.history.replaceState){
-          window.history.replaceState({}, document.title, window.location.pathname);
-        }
-      }
-    }catch(e){}
-  }
-})();
 </script>
 <script>
 (function(){
