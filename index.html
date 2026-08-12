@@ -7436,7 +7436,7 @@ function LoginScreen({
         } = await sb.auth.signInWithOAuth({
           provider: "google",
           options: {
-            redirectTo: "https://vcgfounders-gif.github.io/Clinica-Vargas/",
+            redirectTo: "https://vcgfounders-gif.github.io/Clinica-Vargas/", queryParams: {prompt: "select_account"},
             skipBrowserRedirect: true
           }
         });
@@ -7456,7 +7456,7 @@ function LoginScreen({
         } = await sb.auth.signInWithOAuth({
           provider: "google",
           options: {
-            redirectTo: "https://vcgfounders-gif.github.io/Clinica-Vargas/"
+            redirectTo: "https://vcgfounders-gif.github.io/Clinica-Vargas/", queryParams: {prompt: "select_account"}
           }
         });
         if (error) {
