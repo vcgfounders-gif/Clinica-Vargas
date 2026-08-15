@@ -1,5 +1,5 @@
 /* Service worker — SIEMPRE red primero para el HTML, borra caché vieja agresivamente */
-const VERSION = "20260722h";
+const VERSION = "20260722i";
 const CACHE = "gv-" + VERSION;
 const ESTATICOS = ["./icon-192.png","./icon-512.png","./icon-180.png","./manifest.webmanifest"];
 
